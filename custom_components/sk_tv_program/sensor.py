@@ -46,10 +46,12 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
     def native_value(self) -> str:
         """Return the state of the sensor."""
         if not self.coordinator.data:
+            _LOGGER.debug("No coordinator data available")
             return "Nedostupné"
             
         channel_data = self.coordinator.data.get(self._channel_id, [])
         if not channel_data:
+            _LOGGER.debug("No channel data for %s", self._channel_id)
             return "Nedostupné"
             
         # Find current program
@@ -57,12 +59,15 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         current_program = None
         
         for program in channel_data:
-            program_datetime = self._parse_program_datetime(program)
-            if program_datetime and program_datetime <= now:
-                current_program = program
-            elif program_datetime and program_datetime > now:
-                break
-                
+            start_dt = program.get('start_datetime')
+            stop_dt = program.get('stop_datetime')
+            
+            if start_dt and stop_dt:
+                # Check if program is currently running
+                if start_dt <= now < stop_dt:
+                    current_program = program
+                    break
+                    
         if current_program:
             return current_program.get('title', 'Neznámý pořad')
         
@@ -84,17 +89,19 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         current_program = None
         next_programs = []
         
-        for i, program in enumerate(channel_data):
-            program_datetime = self._parse_program_datetime(program)
-            if not program_datetime:
+        for program in channel_data:
+            start_dt = program.get('start_datetime')
+            stop_dt = program.get('stop_datetime')
+            
+            if not start_dt or not stop_dt:
                 continue
                 
-            if program_datetime <= now:
+            # Current program
+            if start_dt <= now < stop_dt:
                 current_program = program
-            elif len(next_programs) < 10:  # Next 10 programs
+            # Future programs
+            elif start_dt > now and len(next_programs) < 10:
                 next_programs.append(program)
-            else:
-                break
         
         attributes = {
             "channel": self._channel_name,
@@ -154,15 +161,3 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         ]
         
         return attributes
-
-    def _parse_program_datetime(self, program: Dict) -> datetime | None:
-        """Parse program date and time."""
-        try:
-            date_str = program.get('date', '')
-            time_str = program.get('time', '')
-            if date_str and time_str:
-                datetime_str = f"{date_str} {time_str}"
-                return datetime.strptime(datetime_str, "%Y-%m-%d %H:%M")
-        except (ValueError, AttributeError) as err:
-            _LOGGER.debug("Error parsing datetime: %s", err)
-        return None
