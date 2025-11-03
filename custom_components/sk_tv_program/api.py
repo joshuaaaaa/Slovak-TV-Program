@@ -68,3 +68,4 @@ class SkTVProgramAPI:
             "rtvs1": ["Jednotka", "RTVS 1", "RTVS1"],
             "rtvs2": ["Dvojka", "RTVS 2", "RTVS2"],
             "rtvs24": ["RTVS 24", ":24", "RTVS24"],
+        }
