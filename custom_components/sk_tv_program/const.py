@@ -21,7 +21,7 @@ AVAILABLE_CHANNELS = {
 
 # API Configuration
 XMLTV_API_URL = "http://api.rtvs.sk/xml/xmltv.xml"
-LEMONCZE_API_URL = "https://api.lemoncze.com/stable/program.php"
+LEMONCZE_API_URL = "https://api.lemoncze.com/stable/program.php?type=xmltv"
 API_TIMEOUT = 30
 
 # Default values
