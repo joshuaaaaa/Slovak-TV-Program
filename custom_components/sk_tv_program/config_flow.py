@@ -27,7 +27,7 @@ class SkTVProgramConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             # Validate and create entry
-            await self.async_set_unique_id(f"sk_tv_program_default")
+            await self.async_set_unique_id("sk_tv_program")
             self._abort_if_unique_id_configured()
 
             return self.async_create_entry(
