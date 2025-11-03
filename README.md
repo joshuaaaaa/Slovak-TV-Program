@@ -21,7 +21,7 @@ Integrácia pre sťahovanie TV programu slovenských televízií do Home Assista
 4. Vyberte **Custom repositories**
 5. Pridajte URL repozitára:
 ```
-   https://github.com/joshuaaaaa/sk_tv_program
+  https://github.com/joshuaaaaa/Slovak-TV-Program
 ```
 6. Vyberte kategóriu: **Integration**
 7. Kliknite **Add**
