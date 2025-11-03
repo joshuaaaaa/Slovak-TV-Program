@@ -46,14 +46,16 @@ class SkTVProgramAPI:
                 programs.sort(key=lambda x: (x.get("date"), x.get("time")))
                 all_data[channel_id] = programs
 
-                if not programs:
+                if programs:
+                    _LOGGER.debug("Found %d programs for channel %s", len(programs), channel_id)
+                else:
                     _LOGGER.warning("No programs found for channel %s", channel_id)
 
-            _LOGGER.debug("Fetched TV program for %d channels", len(all_data))
+            _LOGGER.info("Fetched TV program for %d channels", len(all_data))
             return all_data
 
         except Exception as err:
-            _LOGGER.error("Error fetching TV program: %s", err)
+            _LOGGER.error("Error fetching TV program: %s", err, exc_info=True)
             return all_data
 
     async def _fetch_xmltv(self, url: str) -> Optional[Element]:
@@ -63,6 +65,7 @@ class SkTVProgramAPI:
                 if response.status == 200:
                     content = await response.text()
                     root = ET.fromstring(content)
+                    _LOGGER.debug("Successfully fetched XMLTV from %s", url)
                     return root
                 _LOGGER.warning("Failed to fetch XMLTV: HTTP %s (%s)", response.status, url)
                 return None
@@ -82,31 +85,29 @@ class SkTVProgramAPI:
         now = datetime.now()
         end_date = now + timedelta(days=DEFAULT_DAYS_AHEAD)
 
-        # Names used in XMLTV for this channel
-        channel_map = {
-            "rtvs1": ["Jednotka", "RTVS 1", "RTVS1"],
-            "rtvs2": ["Dvojka", "RTVS 2", "RTVS2"],
-            "rtvs24": ["RTVS 24", ":24", "RTVS24"],
-            "rtvs_sport": ["RTVS Sport", "RTVS Šport"],
-            "markiza": ["Markíza", "Markiza"],
-            "doma": ["Doma"],
-            "dajto": ["Dajto"],
-            "joj": ["JOJ"],
-            "joj_plus": ["JOJ Plus", "Plus"],
-            "wau": ["WAU"],
-            "prima": ["Prima", "TV Prima"],
-            "ta3": ["TA3"],
+        # Channel ID mapping for XMLTV
+        xmltv_channel_ids = {
+            "rtvs1": ["jednotka.rtvs.sk", "rtvs1", "rtvs 1"],
+            "rtvs2": ["dvojka.rtvs.sk", "rtvs2", "rtvs 2"],
+            "rtvs24": ["24.rtvs.sk", "rtvs24", "rtvs :24"],
+            "rtvs_sport": ["sport.rtvs.sk", "rtvs sport"],
+            "markiza": ["markiza.sk", "tv markiza"],
+            "doma": ["doma.sk", "tv doma"],
+            "dajto": ["dajto.sk", "tv dajto"],
+            "joj": ["joj.sk", "tv joj"],
+            "joj_plus": ["jojplus.sk", "joj plus"],
+            "wau": ["wau.sk"],
+            "prima": ["prima.sk", "tv prima"],
+            "ta3": ["ta3.sk"],
         }
 
-        channel_names = [n.lower() for n in channel_map.get(channel_id, [channel_id])]
+        channel_ids = [cid.lower() for cid in xmltv_channel_ids.get(channel_id, [channel_id])]
 
         for programme in xmltv_root.findall("programme"):
             channel_attr = programme.attrib.get("channel", "").lower()
-            # Fallback: check display-name tag
-            display_name_el = programme.find("channel/display-name")
-            display_name = display_name_el.text.lower() if display_name_el is not None else ""
-
-            if not any(name in channel_attr or name in display_name for name in channel_names):
+            
+            # Check if this program belongs to our channel
+            if not any(cid in channel_attr for cid in channel_ids):
                 continue
 
             start_str = programme.attrib.get("start")
@@ -115,29 +116,40 @@ class SkTVProgramAPI:
                 continue
 
             try:
-                start = datetime.strptime(start_str[:12], "%Y%m%d%H%M")
-                stop = datetime.strptime(stop_str[:12], "%Y%m%d%H%M")
-            except Exception:
+                # Parse XMLTV datetime format (YYYYMMDDHHmmss +ZONE)
+                start = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S")
+                stop = datetime.strptime(stop_str[:14], "%Y%m%d%H%M%S")
+            except Exception as e:
+                _LOGGER.debug("Error parsing datetime for %s: %s", start_str, e)
                 continue
 
-            if not (now <= start <= end_date):
+            # Filter by date range
+            if start < now - timedelta(hours=2) or start > end_date:
                 continue
 
+            # Extract program details
             title_el = programme.find("title")
             desc_el = programme.find("desc")
+            category_el = programme.find("category")
+            
+            title = title_el.text if title_el is not None and title_el.text else "Bez názvu"
+            description = desc_el.text if desc_el is not None and desc_el.text else ""
+            genre = category_el.text if category_el is not None and category_el.text else ""
 
-            title = title_el.text if title_el is not None else "Bez názvu"
-            description = desc_el.text if desc_el is not None else ""
+            duration_minutes = int((stop - start).total_seconds() / 60)
 
             programs.append({
                 "title": title,
                 "supertitle": "",
                 "episode_title": "",
                 "description": description,
-                "genre": "",
-                "duration": f"{int((stop - start).total_seconds() / 60)} min",
+                "genre": genre,
+                "duration": f"{duration_minutes} min",
                 "date": start.strftime("%Y-%m-%d"),
                 "time": start.strftime("%H:%M"),
+                "stop_time": stop.strftime("%H:%M"),
+                "start_datetime": start,
+                "stop_datetime": stop,
                 "episode": "",
                 "link": "",
                 "live": False,
