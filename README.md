@@ -77,7 +77,7 @@ Integrácia pre sťahovanie TV programu slovenských televízií do Home Assista
 ### Základná konfigurácia
 ```yaml
 type: custom:tv-program-card
-entity: sensor.tv_program_rtvs1
+entity: sensor.tv_program_rtvs_dvojka
 title: TV Program RTVS Jednotka
 days: 3
 ```
@@ -85,8 +85,8 @@ days: 3
 ### Pokročilá konfigurácia
 ```yaml
 type: custom:tv-program-card
-entity: sensor.tv_program_markiza
-title: TV Markíza Program
+entity: sensor.tv_program_wau
+title: TV WAU Program
 days: 5
 show_genre: true
 show_duration: true
