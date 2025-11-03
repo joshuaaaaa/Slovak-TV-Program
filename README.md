@@ -280,16 +280,7 @@ automation:
 - [ ] Export programu do kalendára
 - [ ] Integrácia s media_player entitami
 
-## 📸 Screenshots
 
-### Dashboard karta
-![TV Program Card](screenshots/card.png)
-
-### Konfigurácia integrácie
-![Integration Config](screenshots/config.png)
-
-### Atribúty senzora
-![Sensor Attributes](screenshots/attributes.png)
 
 ## 📄 Licencia
 
