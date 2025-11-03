@@ -1,6 +1,5 @@
-"""API client for Slovak TV Program with multiple XMLTV sources."""
+"""API client for Slovak TV Program from open-epg.com."""
 import logging
-import aiohttp
 import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -10,7 +9,7 @@ from xml.etree.ElementTree import Element
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import XMLTV_API_URL, LEMONCZE_API_URL, API_TIMEOUT, AVAILABLE_CHANNELS, DEFAULT_DAYS_AHEAD
+from .const import XMLTV_API_URL, API_TIMEOUT, AVAILABLE_CHANNELS, DEFAULT_DAYS_AHEAD
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,26 +23,20 @@ class SkTVProgramAPI:
         self.session = async_get_clientsession(hass)
 
     async def async_update_data(self) -> Dict[str, Any]:
-        """Fetch data from all XMLTV feeds and return structured program info."""
+        """Fetch data from open-epg.com XMLTV feed and return structured program info."""
         all_data: Dict[str, List[Dict[str, Any]]] = {}
         try:
-            # Fetch RTVS feed
-            rtvs_root = await self._fetch_xmltv(XMLTV_API_URL)
-            # Fetch LemonCZE feed (komerční kanály)
-            lemon_root = await self._fetch_xmltv(LEMONCZE_API_URL)
-
-            # Combine feeds
-            xmltv_roots = [r for r in [rtvs_root, lemon_root] if r is not None]
-            if not xmltv_roots:
-                _LOGGER.warning("No XMLTV data available")
+            # Fetch open-epg.com feed
+            xmltv_root = await self._fetch_xmltv(XMLTV_API_URL)
+            
+            if xmltv_root is None:
+                _LOGGER.warning("No XMLTV data available from open-epg.com")
                 return all_data
 
             for channel_id in self.channels:
-                programs: List[Dict[str, Any]] = []
-                for root in xmltv_roots:
-                    programs += self._filter_channel_programs(root, channel_id)
+                programs = self._filter_channel_programs(xmltv_root, channel_id)
                 # Sort programs by date/time
-                programs.sort(key=lambda x: (x.get("date"), x.get("time")))
+                programs.sort(key=lambda x: (x.get("date", ""), x.get("time", "")))
                 all_data[channel_id] = programs
 
                 if programs:
@@ -85,20 +78,20 @@ class SkTVProgramAPI:
         now = datetime.now()
         end_date = now + timedelta(days=DEFAULT_DAYS_AHEAD)
 
-        # Channel ID mapping for XMLTV
+        # Channel ID mapping for open-epg.com XMLTV
         xmltv_channel_ids = {
-            "rtvs1": ["jednotka.rtvs.sk", "rtvs1", "rtvs 1"],
-            "rtvs2": ["dvojka.rtvs.sk", "rtvs2", "rtvs 2"],
-            "rtvs24": ["24.rtvs.sk", "rtvs24", "rtvs :24"],
-            "rtvs_sport": ["sport.rtvs.sk", "rtvs sport"],
-            "markiza": ["markiza.sk", "tv markiza"],
-            "doma": ["doma.sk", "tv doma"],
-            "dajto": ["dajto.sk", "tv dajto"],
-            "joj": ["joj.sk", "tv joj"],
-            "joj_plus": ["jojplus.sk", "joj plus"],
-            "wau": ["wau.sk"],
-            "prima": ["prima.sk", "tv prima"],
-            "ta3": ["ta3.sk"],
+            "rtvs1": ["Jednotka", "RTVS1", "RTVS 1", "rtvs1.sk", "jednotka.rtvs.sk"],
+            "rtvs2": ["Dvojka", "RTVS2", "RTVS 2", "rtvs2.sk", "dvojka.rtvs.sk"],
+            "rtvs24": ["RTVS24", "RTVS :24", ":24", "24.rtvs.sk"],
+            "rtvs_sport": ["RTVSSport", "RTVS Sport", "sport.rtvs.sk"],
+            "markiza": ["Markiza", "TV Markiza", "markiza.sk"],
+            "doma": ["Doma", "TV Doma", "doma.sk"],
+            "dajto": ["Dajto", "TV Dajto", "dajto.sk"],
+            "joj": ["JOJ", "TV JOJ", "joj.sk"],
+            "joj_plus": ["JOJPlus", "JOJ Plus", "Plus", "jojplus.sk"],
+            "wau": ["WAU", "wau.sk"],
+            "prima": ["Prima", "TV Prima", "prima.sk"],
+            "ta3": ["TA3", "ta3.sk"],
         }
 
         channel_ids = [cid.lower() for cid in xmltv_channel_ids.get(channel_id, [channel_id])]
@@ -123,7 +116,7 @@ class SkTVProgramAPI:
                 _LOGGER.debug("Error parsing datetime for %s: %s", start_str, e)
                 continue
 
-            # Filter by date range
+            # Filter by date range (keep programs from 2 hours ago to 7 days ahead)
             if start < now - timedelta(hours=2) or start > end_date:
                 continue
 
@@ -131,17 +124,19 @@ class SkTVProgramAPI:
             title_el = programme.find("title")
             desc_el = programme.find("desc")
             category_el = programme.find("category")
+            sub_title_el = programme.find("sub-title")
             
             title = title_el.text if title_el is not None and title_el.text else "Bez názvu"
             description = desc_el.text if desc_el is not None and desc_el.text else ""
             genre = category_el.text if category_el is not None and category_el.text else ""
+            episode_title = sub_title_el.text if sub_title_el is not None and sub_title_el.text else ""
 
             duration_minutes = int((stop - start).total_seconds() / 60)
 
             programs.append({
                 "title": title,
                 "supertitle": "",
-                "episode_title": "",
+                "episode_title": episode_title,
                 "description": description,
                 "genre": genre,
                 "duration": f"{duration_minutes} min",
