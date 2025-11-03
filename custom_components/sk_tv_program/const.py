@@ -19,9 +19,8 @@ AVAILABLE_CHANNELS = {
     "ta3": "TA3",
 }
 
-# API Configuration
-XMLTV_API_URL = "http://api.rtvs.sk/xml/xmltv.xml"
-LEMONCZE_API_URL = "https://api.lemoncze.com/stable/program.php?type=xmltv"
+# API Configuration - using open-epg.com
+XMLTV_API_URL = "https://www.open-epg.com/files/slovakia1.xml"
 API_TIMEOUT = 30
 
 # Default values
