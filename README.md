@@ -29,19 +29,6 @@ Integrácia pre sťahovanie TV programu slovenských televízií do Home Assista
 9. Kliknite **Download**
 10. **Reštartujte Home Assistant**
 
-#### Pridanie custom karty cez HACS
-
-1. V HACS prejdite na **Frontend**
-2. Kliknite na **⋮** (tri bodky v pravom hornom rohu)
-3. Vyberte **Custom repositories**
-4. Pridajte URL:
-```
-   https://github.com/vase-uzivatelske-meno/sk_tv_program
-```
-5. Vyberte kategóriu: **Lovelace**
-6. Kliknite **Add**
-7. Nájdite **TV Program Card** a kliknite **Download**
-8. **Obnovte prehliadač** (Ctrl+F5)
 
 ### Metóda 2: Manuálna inštalácia
 
