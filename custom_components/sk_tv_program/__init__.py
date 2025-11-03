@@ -14,6 +14,12 @@ _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(hours=6)
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Slovak TV Program component."""
+    hass.data.setdefault(DOMAIN, {})
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Slovak TV Program from a config entry."""
     hass.data.setdefault(DOMAIN, {})
