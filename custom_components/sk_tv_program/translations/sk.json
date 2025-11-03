@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nastavenie Slovak TV Program",
+        "description": "Nakonfigurujte integráciu pre sťahovanie TV programu slovenskej televízie",
+        "data": {
+          "channels": "Vyberte TV kanály"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nepodarilo sa pripojiť k API slovenskej televízie",
+      "unknown": "Neznáma chyba"
+    },
+    "abort": {
+      "already_configured": "Integrácia Slovak TV Program je už nakonfigurovaná"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Možnosti Slovak TV Program",
+        "data": {
+          "channels": "Vyberte TV kanály"
+        }
+      }
+    }
+  }
+}

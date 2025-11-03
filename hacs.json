@@ -1,0 +1,9 @@
+{
+  "name": "Slovak TV Program",
+  "content_in_root": false,
+  "filename": "sk_tv_program",
+  "render_readme": true,
+  "domains": ["sensor"],
+  "country": ["SK"],
+  "homeassistant": "2023.1.0"
+}
