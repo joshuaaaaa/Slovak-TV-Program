@@ -1,12 +1,13 @@
 """Config flow for Slovak TV Program integration."""
+from __future__ import annotations
+
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN, AVAILABLE_CHANNELS
@@ -14,20 +15,18 @@ from .const import DOMAIN, AVAILABLE_CHANNELS
 _LOGGER = logging.getLogger(__name__)
 
 
-class SkTVProgramConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+@config_entries.HANDLERS.register(DOMAIN)
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Slovak TV Program."""
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: Optional[Dict[str, Any]] = None
-    ) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None):
         """Handle the initial step."""
         errors = {}
 
         if user_input is not None:
-            # Validate and create entry
-            await self.async_set_unique_id("sk_tv_program")
+            await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
 
             return self.async_create_entry(
@@ -35,21 +34,21 @@ class SkTVProgramConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data=user_input,
             )
 
-        # Build multi-select options for channels
         channel_options = {
             channel_id: channel_name 
             for channel_id, channel_name in AVAILABLE_CHANNELS.items()
         }
 
-        data_schema = vol.Schema(
-            {
-                vol.Required("channels", default=list(AVAILABLE_CHANNELS.keys())): cv.multi_select(channel_options),
-            }
-        )
-
         return self.async_show_form(
             step_id="user",
-            data_schema=data_schema,
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "channels",
+                        default=list(AVAILABLE_CHANNELS.keys())
+                    ): cv.multi_select(channel_options),
+                }
+            ),
             errors=errors,
         )
 
@@ -57,10 +56,10 @@ class SkTVProgramConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return SkTVProgramOptionsFlow(config_entry)
+        return OptionsFlow(config_entry)
 
 
-class SkTVProgramOptionsFlow(config_entries.OptionsFlow):
+class OptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Slovak TV Program."""
 
     def __init__(self, config_entry):
