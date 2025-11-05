@@ -2,12 +2,14 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, AVAILABLE_CHANNELS
 
@@ -54,8 +56,8 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
             _LOGGER.debug("No channel data for %s", self._channel_id)
             return "Nedostupné"
             
-        # Find current program
-        now = datetime.now()
+        # Get current time with timezone awareness
+        now = dt_util.now()
         current_program = None
         
         for program in channel_data:
@@ -63,6 +65,12 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
             stop_dt = program.get('stop_datetime')
             
             if start_dt and stop_dt:
+                # Ensure datetime objects are timezone-aware
+                if start_dt.tzinfo is None:
+                    start_dt = dt_util.as_local(start_dt)
+                if stop_dt.tzinfo is None:
+                    stop_dt = dt_util.as_local(stop_dt)
+                
                 # Check if program is currently running
                 if start_dt <= now < stop_dt:
                     current_program = program
@@ -83,7 +91,8 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         if not channel_data:
             return {}
             
-        now = datetime.now()
+        # Get current time with timezone awareness
+        now = dt_util.now()
         
         # Find current and next programs
         current_program = None
@@ -95,6 +104,12 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
             
             if not start_dt or not stop_dt:
                 continue
+            
+            # Ensure datetime objects are timezone-aware
+            if start_dt.tzinfo is None:
+                start_dt = dt_util.as_local(start_dt)
+            if stop_dt.tzinfo is None:
+                stop_dt = dt_util.as_local(stop_dt)
                 
             # Current program
             if start_dt <= now < stop_dt:
