@@ -8,6 +8,7 @@ from xml.etree.ElementTree import Element
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 
 from .const import XMLTV_API_URL, API_TIMEOUT, AVAILABLE_CHANNELS, DEFAULT_DAYS_AHEAD
 
@@ -36,7 +37,7 @@ class SkTVProgramAPI:
             for channel_id in self.channels:
                 programs = self._filter_channel_programs(xmltv_root, channel_id)
                 # Sort programs by date/time
-                programs.sort(key=lambda x: (x.get("date", ""), x.get("time", "")))
+                programs.sort(key=lambda x: x.get("start_datetime", datetime.min))
                 all_data[channel_id] = programs
 
                 if programs:
@@ -69,13 +70,45 @@ class SkTVProgramAPI:
             _LOGGER.error("Error fetching XMLTV from %s: %s", url, err)
             return None
 
+    def _parse_xmltv_datetime(self, dt_string: str) -> Optional[datetime]:
+        """Parse XMLTV datetime format (YYYYMMDDHHmmss +ZONE) to timezone-aware datetime."""
+        try:
+            # XMLTV format: 20241105094000 +0100
+            # Extract datetime part and timezone offset
+            dt_part = dt_string[:14]  # YYYYMMDDHHmmss
+            tz_part = dt_string[15:20]  # +0100 or -0500
+            
+            # Parse the datetime
+            naive_dt = datetime.strptime(dt_part, "%Y%m%d%H%M%S")
+            
+            # Parse timezone offset
+            if tz_part:
+                sign = 1 if tz_part[0] == '+' else -1
+                hours = int(tz_part[1:3])
+                minutes = int(tz_part[3:5])
+                offset = timedelta(hours=sign * hours, minutes=sign * minutes)
+                
+                # Create timezone-aware datetime in UTC
+                utc_dt = naive_dt - offset
+                # Convert to local timezone
+                aware_dt = dt_util.as_local(utc_dt.replace(tzinfo=dt_util.UTC))
+            else:
+                # No timezone info, assume local
+                aware_dt = dt_util.as_local(naive_dt)
+            
+            return aware_dt
+            
+        except Exception as e:
+            _LOGGER.debug("Error parsing XMLTV datetime %s: %s", dt_string, e)
+            return None
+
     def _filter_channel_programs(self, xmltv_root: Element, channel_id: str) -> List[Dict[str, Any]]:
         """Filter and parse programs for a specific channel from XMLTV."""
         programs: List[Dict[str, Any]] = []
         if xmltv_root is None:
             return programs
 
-        now = datetime.now()
+        now = dt_util.now()
         end_date = now + timedelta(days=DEFAULT_DAYS_AHEAD)
 
         # Channel ID mapping for open-epg.com XMLTV
@@ -108,12 +141,11 @@ class SkTVProgramAPI:
             if not start_str or not stop_str:
                 continue
 
-            try:
-                # Parse XMLTV datetime format (YYYYMMDDHHmmss +ZONE)
-                start = datetime.strptime(start_str[:14], "%Y%m%d%H%M%S")
-                stop = datetime.strptime(stop_str[:14], "%Y%m%d%H%M%S")
-            except Exception as e:
-                _LOGGER.debug("Error parsing datetime for %s: %s", start_str, e)
+            # Parse XMLTV datetime with timezone
+            start = self._parse_xmltv_datetime(start_str)
+            stop = self._parse_xmltv_datetime(stop_str)
+            
+            if not start or not stop:
                 continue
 
             # Filter by date range (keep programs from 2 hours ago to 7 days ahead)
