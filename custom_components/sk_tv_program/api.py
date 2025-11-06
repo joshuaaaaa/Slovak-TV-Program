@@ -14,6 +14,9 @@ from .const import XMLTV_API_URL, API_TIMEOUT, AVAILABLE_CHANNELS, DEFAULT_DAYS_
 
 _LOGGER = logging.getLogger(__name__)
 
+# Maximální počet programů na kanál pro zabránění memory problémům
+MAX_PROGRAMS_PER_CHANNEL = 500
+
 class SkTVProgramAPI:
     """API client for Slovak TV Program."""
 
@@ -34,16 +37,37 @@ class SkTVProgramAPI:
                 _LOGGER.warning("No XMLTV data available from open-epg.com")
                 return all_data
 
+            # Parsování v executor aby neblokoval event loop
             for channel_id in self.channels:
-                programs = self._filter_channel_programs(xmltv_root, channel_id)
-                # Sort programs by date/time
-                programs.sort(key=lambda x: x.get("start_datetime", datetime.min))
-                all_data[channel_id] = programs
+                try:
+                    # Použít executor pro CPU-intensive operace
+                    programs = await self.hass.async_add_executor_job(
+                        self._filter_channel_programs,
+                        xmltv_root,
+                        channel_id
+                    )
+                    
+                    # Sort programs by date/time
+                    programs.sort(key=lambda x: x.get("start_datetime", datetime.min))
+                    
+                    # Limit počtu programů
+                    if len(programs) > MAX_PROGRAMS_PER_CHANNEL:
+                        _LOGGER.warning(
+                            "Channel %s has %d programs, limiting to %d",
+                            channel_id, len(programs), MAX_PROGRAMS_PER_CHANNEL
+                        )
+                        programs = programs[:MAX_PROGRAMS_PER_CHANNEL]
+                    
+                    all_data[channel_id] = programs
 
-                if programs:
-                    _LOGGER.debug("Found %d programs for channel %s", len(programs), channel_id)
-                else:
-                    _LOGGER.warning("No programs found for channel %s", channel_id)
+                    if programs:
+                        _LOGGER.debug("Found %d programs for channel %s", len(programs), channel_id)
+                    else:
+                        _LOGGER.warning("No programs found for channel %s", channel_id)
+                        
+                except Exception as err:
+                    _LOGGER.error("Error processing channel %s: %s", channel_id, err, exc_info=True)
+                    all_data[channel_id] = []
 
             _LOGGER.info("Fetched TV program for %d channels", len(all_data))
             return all_data
@@ -58,11 +82,27 @@ class SkTVProgramAPI:
             async with self.session.get(url, timeout=API_TIMEOUT) as response:
                 if response.status == 200:
                     content = await response.text()
-                    root = ET.fromstring(content)
-                    _LOGGER.debug("Successfully fetched XMLTV from %s", url)
+                    
+                    # Check content size
+                    content_size_mb = len(content) / (1024 * 1024)
+                    if content_size_mb > 10:
+                        _LOGGER.warning(
+                            "Large XML file detected: %.2f MB. This may cause performance issues.",
+                            content_size_mb
+                        )
+                    
+                    # Parse XML v executor aby neblokoval
+                    root = await self.hass.async_add_executor_job(
+                        ET.fromstring,
+                        content
+                    )
+                    
+                    _LOGGER.debug("Successfully fetched XMLTV from %s (%.2f MB)", url, content_size_mb)
                     return root
+                    
                 _LOGGER.warning("Failed to fetch XMLTV: HTTP %s (%s)", response.status, url)
                 return None
+                
         except asyncio.TimeoutError:
             _LOGGER.error("Timeout fetching XMLTV data from %s", url)
             return None
@@ -76,7 +116,7 @@ class SkTVProgramAPI:
             # XMLTV format: 20241105094000 +0100
             # Extract datetime part and timezone offset
             dt_part = dt_string[:14]  # YYYYMMDDHHmmss
-            tz_part = dt_string[15:20]  # +0100 or -0500
+            tz_part = dt_string[15:20] if len(dt_string) > 15 else ""  # +0100 or -0500
             
             # Parse the datetime
             naive_dt = datetime.strptime(dt_part, "%Y%m%d%H%M%S")
@@ -103,13 +143,20 @@ class SkTVProgramAPI:
             return None
 
     def _filter_channel_programs(self, xmltv_root: Element, channel_id: str) -> List[Dict[str, Any]]:
-        """Filter and parse programs for a specific channel from XMLTV."""
+        """Filter and parse programs for a specific channel from XMLTV.
+        
+        Note: This method runs in executor to avoid blocking the event loop.
+        """
         programs: List[Dict[str, Any]] = []
         if xmltv_root is None:
             return programs
 
         now = dt_util.now()
         end_date = now + timedelta(days=DEFAULT_DAYS_AHEAD)
+        
+        # Limit pro zabránění nekonečným smyčkám
+        max_iterations = 10000
+        iteration_count = 0
 
         # Channel ID mapping for open-epg.com XMLTV
         xmltv_channel_ids = {
@@ -129,58 +176,80 @@ class SkTVProgramAPI:
 
         channel_ids = [cid.lower() for cid in xmltv_channel_ids.get(channel_id, [channel_id])]
 
-        for programme in xmltv_root.findall("programme"):
-            channel_attr = programme.attrib.get("channel", "").lower()
-            
-            # Check if this program belongs to our channel
-            if not any(cid in channel_attr for cid in channel_ids):
-                continue
+        try:
+            for programme in xmltv_root.findall("programme"):
+                iteration_count += 1
+                
+                # Safety check pro zabránění nekonečné smyčky
+                if iteration_count > max_iterations:
+                    _LOGGER.warning(
+                        "Reached maximum iterations (%d) for channel %s",
+                        max_iterations, channel_id
+                    )
+                    break
+                
+                # Také limit počtu programů
+                if len(programs) >= MAX_PROGRAMS_PER_CHANNEL:
+                    _LOGGER.debug(
+                        "Reached program limit (%d) for channel %s",
+                        MAX_PROGRAMS_PER_CHANNEL, channel_id
+                    )
+                    break
+                
+                channel_attr = programme.attrib.get("channel", "").lower()
+                
+                # Check if this program belongs to our channel
+                if not any(cid in channel_attr for cid in channel_ids):
+                    continue
 
-            start_str = programme.attrib.get("start")
-            stop_str = programme.attrib.get("stop")
-            if not start_str or not stop_str:
-                continue
+                start_str = programme.attrib.get("start")
+                stop_str = programme.attrib.get("stop")
+                if not start_str or not stop_str:
+                    continue
 
-            # Parse XMLTV datetime with timezone
-            start = self._parse_xmltv_datetime(start_str)
-            stop = self._parse_xmltv_datetime(stop_str)
-            
-            if not start or not stop:
-                continue
+                # Parse XMLTV datetime with timezone
+                start = self._parse_xmltv_datetime(start_str)
+                stop = self._parse_xmltv_datetime(stop_str)
+                
+                if not start or not stop:
+                    continue
 
-            # Filter by date range (keep programs from 2 hours ago to 7 days ahead)
-            if start < now - timedelta(hours=2) or start > end_date:
-                continue
+                # Filter by date range (keep programs from 2 hours ago to 7 days ahead)
+                if start < now - timedelta(hours=2) or start > end_date:
+                    continue
 
-            # Extract program details
-            title_el = programme.find("title")
-            desc_el = programme.find("desc")
-            category_el = programme.find("category")
-            sub_title_el = programme.find("sub-title")
-            
-            title = title_el.text if title_el is not None and title_el.text else "Bez názvu"
-            description = desc_el.text if desc_el is not None and desc_el.text else ""
-            genre = category_el.text if category_el is not None and category_el.text else ""
-            episode_title = sub_title_el.text if sub_title_el is not None and sub_title_el.text else ""
+                # Extract program details
+                title_el = programme.find("title")
+                desc_el = programme.find("desc")
+                category_el = programme.find("category")
+                sub_title_el = programme.find("sub-title")
+                
+                title = title_el.text if title_el is not None and title_el.text else "Bez názvu"
+                description = desc_el.text if desc_el is not None and desc_el.text else ""
+                genre = category_el.text if category_el is not None and category_el.text else ""
+                episode_title = sub_title_el.text if sub_title_el is not None and sub_title_el.text else ""
 
-            duration_minutes = int((stop - start).total_seconds() / 60)
+                duration_minutes = int((stop - start).total_seconds() / 60)
 
-            programs.append({
-                "title": title,
-                "supertitle": "",
-                "episode_title": episode_title,
-                "description": description,
-                "genre": genre,
-                "duration": f"{duration_minutes} min",
-                "date": start.strftime("%Y-%m-%d"),
-                "time": start.strftime("%H:%M"),
-                "stop_time": stop.strftime("%H:%M"),
-                "start_datetime": start,
-                "stop_datetime": stop,
-                "episode": "",
-                "link": "",
-                "live": False,
-                "premiere": False,
-            })
+                programs.append({
+                    "title": title,
+                    "supertitle": "",
+                    "episode_title": episode_title,
+                    "description": description,
+                    "genre": genre,
+                    "duration": f"{duration_minutes} min",
+                    "date": start.strftime("%Y-%m-%d"),
+                    "time": start.strftime("%H:%M"),
+                    "stop_time": stop.strftime("%H:%M"),
+                    "start_datetime": start,
+                    "stop_datetime": stop,
+                    "episode": "",
+                    "link": "",
+                    "live": False,
+                    "premiere": False,
+                })
+                
+        except Exception as err:
+            _LOGGER.error("Error filtering programs for channel %s: %s", channel_id, err, exc_info=True)
 
         return programs
