@@ -32,7 +32,7 @@ class SkTVProgramAPI:
         try:
             # Fetch open-epg.com feed
             xmltv_root = await self._fetch_xmltv(XMLTV_API_URL)
-            
+
             if xmltv_root is None:
                 _LOGGER.warning("No XMLTV data available from open-epg.com")
                 return all_data
@@ -46,10 +46,10 @@ class SkTVProgramAPI:
                         xmltv_root,
                         channel_id
                     )
-                    
+
                     # Sort programs by date/time
                     programs.sort(key=lambda x: x.get("start_datetime", datetime.min))
-                    
+
                     # Limit počtu programů
                     if len(programs) > MAX_PROGRAMS_PER_CHANNEL:
                         _LOGGER.warning(
@@ -57,14 +57,14 @@ class SkTVProgramAPI:
                             channel_id, len(programs), MAX_PROGRAMS_PER_CHANNEL
                         )
                         programs = programs[:MAX_PROGRAMS_PER_CHANNEL]
-                    
+
                     all_data[channel_id] = programs
 
                     if programs:
                         _LOGGER.debug("Found %d programs for channel %s", len(programs), channel_id)
                     else:
                         _LOGGER.warning("No programs found for channel %s", channel_id)
-                        
+
                 except Exception as err:
                     _LOGGER.error("Error processing channel %s: %s", channel_id, err, exc_info=True)
                     all_data[channel_id] = []
@@ -75,6 +75,45 @@ class SkTVProgramAPI:
         except Exception as err:
             _LOGGER.error("Error fetching TV program: %s", err, exc_info=True)
             return all_data
+
+    async def async_update_channel_data(self, channel_id: str) -> List[Dict[str, Any]]:
+        """Fetch data for a single channel from open-epg.com XMLTV feed."""
+        try:
+            # Fetch open-epg.com feed
+            xmltv_root = await self._fetch_xmltv(XMLTV_API_URL)
+
+            if xmltv_root is None:
+                _LOGGER.warning("No XMLTV data available from open-epg.com for channel %s", channel_id)
+                return []
+
+            # Použít executor pro CPU-intensive operace
+            programs = await self.hass.async_add_executor_job(
+                self._filter_channel_programs,
+                xmltv_root,
+                channel_id
+            )
+
+            # Sort programs by date/time
+            programs.sort(key=lambda x: x.get("start_datetime", datetime.min))
+
+            # Limit počtu programů
+            if len(programs) > MAX_PROGRAMS_PER_CHANNEL:
+                _LOGGER.warning(
+                    "Channel %s has %d programs, limiting to %d",
+                    channel_id, len(programs), MAX_PROGRAMS_PER_CHANNEL
+                )
+                programs = programs[:MAX_PROGRAMS_PER_CHANNEL]
+
+            if programs:
+                _LOGGER.debug("Found %d programs for channel %s", len(programs), channel_id)
+            else:
+                _LOGGER.warning("No programs found for channel %s", channel_id)
+
+            return programs
+
+        except Exception as err:
+            _LOGGER.error("Error fetching TV program for channel %s: %s", channel_id, err, exc_info=True)
+            return []
 
     async def _fetch_xmltv(self, url: str) -> Optional[Element]:
         """Fetch XMLTV data from a given URL."""
