@@ -55,10 +55,11 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         self._cached_data: Optional[Tuple[Optional[Dict], List[Dict]]] = None
         self._last_update: Optional[datetime] = None
 
-        # JSON storage path
+        # JSON storage path and cached JSON data
         storage_dir = os.path.join(hass.config.path(), ".storage", DOMAIN)
         os.makedirs(storage_dir, exist_ok=True)
         self._json_file = os.path.join(storage_dir, f"{channel_id}.json")
+        self._json_cached_data: List[Dict[str, Any]] = []
 
         # Load cached data from JSON on init
         self._load_from_json()
@@ -75,9 +76,11 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
                             program['start_datetime'] = datetime.fromisoformat(program['start_datetime'])
                         if 'stop_datetime' in program and isinstance(program['stop_datetime'], str):
                             program['stop_datetime'] = datetime.fromisoformat(program['stop_datetime'])
-                    _LOGGER.debug("Loaded %d programs from JSON for %s", len(data), self._channel_id)
+                    self._json_cached_data = data
+                    _LOGGER.info("Loaded %d programs from JSON for %s", len(data), self._channel_id)
             except Exception as err:
                 _LOGGER.error("Error loading JSON for %s: %s", self._channel_id, err)
+                self._json_cached_data = []
 
     def _save_to_json(self, data: List[Dict[str, Any]]) -> None:
         """Save data to JSON file."""
@@ -100,19 +103,21 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def _channel_data(self) -> List[Dict[str, Any]]:
-        """Get channel data from coordinator."""
-        if not self.coordinator.data:
-            return []
-        # Data are now a list directly, not a dict
-        return self.coordinator.data if isinstance(self.coordinator.data, list) else []
+        """Get channel data from coordinator or JSON cache."""
+        if self.coordinator.data and isinstance(self.coordinator.data, list):
+            # Data from coordinator
+            return self.coordinator.data
+        # Fallback to JSON cached data if coordinator has no data
+        return self._json_cached_data
 
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
-        # Save to JSON when coordinator updates
-        channel_data = self._channel_data
-        if channel_data:
-            self._save_to_json(channel_data)
         super()._handle_coordinator_update()
+        # Save to JSON when coordinator updates
+        if self.coordinator.data and isinstance(self.coordinator.data, list):
+            self._json_cached_data = self.coordinator.data
+            self._save_to_json(self.coordinator.data)
+            _LOGGER.info("Updated data for %s: %d programs", self._channel_id, len(self.coordinator.data))
 
     def _get_programs(self) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
         """Get current and next programs with caching."""

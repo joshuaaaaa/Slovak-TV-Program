@@ -40,11 +40,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async def async_update_data(channel=channel_id, api_instance=api):
                 """Fetch data with error handling for a specific channel."""
                 try:
+                    _LOGGER.info("Fetching data for channel %s", channel)
                     data = await api_instance.async_update_channel_data(channel)
                     if not data:
                         _LOGGER.warning("No data received from API for channel %s", channel)
+                    else:
+                        _LOGGER.info("Successfully fetched %d programs for channel %s", len(data), channel)
                     return data
                 except Exception as err:
+                    _LOGGER.error("Error fetching data for channel %s: %s", channel, err, exc_info=True)
                     raise UpdateFailed(f"Error fetching data for {channel}: {err}") from err
 
             coordinator = DataUpdateCoordinator(
