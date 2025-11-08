@@ -61,6 +61,8 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
         self._json_file = os.path.join(storage_dir, f"{channel_id}.json")
         self._json_cached_data: List[Dict[str, Any]] = []
 
+        _LOGGER.info("JSON storage path for %s: %s", channel_id, self._json_file)
+
         # Load cached data from JSON on init
         self._load_from_json()
 
