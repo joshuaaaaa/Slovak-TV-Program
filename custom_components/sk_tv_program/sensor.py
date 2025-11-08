@@ -1,5 +1,7 @@
 """Sensor platform for Slovak TV Program."""
 import logging
+import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 from functools import lru_cache
@@ -26,38 +28,95 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor platform."""
-    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
-    channels = config_entry.data.get("channels", [])
-    
+    coordinators = hass.data[DOMAIN][config_entry.entry_id]
+
     entities = []
-    for channel_id in channels:
-        entities.append(SkTVProgramSensor(coordinator, channel_id))
-    
+    for channel_id, channel_data in coordinators.items():
+        coordinator = channel_data["coordinator"]
+        entities.append(SkTVProgramSensor(hass, coordinator, channel_id))
+
     async_add_entities(entities)
 
 
 class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Slovak TV Program sensor."""
 
-    def __init__(self, coordinator, channel_id: str):
+    def __init__(self, hass: HomeAssistant, coordinator, channel_id: str):
         """Initialize the sensor."""
         super().__init__(coordinator)
+        self._hass = hass
         self._channel_id = channel_id
         self._channel_name = AVAILABLE_CHANNELS.get(channel_id, channel_id)
         self._attr_name = f"TV Program {self._channel_name}"
         self._attr_unique_id = f"{DOMAIN}_{channel_id}"
         self._attr_icon = "mdi:television-classic"
-        
+
         # Cache pro current/next programs
         self._cached_data: Optional[Tuple[Optional[Dict], List[Dict]]] = None
         self._last_update: Optional[datetime] = None
 
+        # JSON storage path
+        storage_dir = os.path.join(hass.config.path(), ".storage", DOMAIN)
+        os.makedirs(storage_dir, exist_ok=True)
+        self._json_file = os.path.join(storage_dir, f"{channel_id}.json")
+
+        # Load cached data from JSON on init
+        self._load_from_json()
+
+    def _load_from_json(self) -> None:
+        """Load cached data from JSON file."""
+        if os.path.exists(self._json_file):
+            try:
+                with open(self._json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Convert datetime strings back to datetime objects
+                    for program in data:
+                        if 'start_datetime' in program and isinstance(program['start_datetime'], str):
+                            program['start_datetime'] = datetime.fromisoformat(program['start_datetime'])
+                        if 'stop_datetime' in program and isinstance(program['stop_datetime'], str):
+                            program['stop_datetime'] = datetime.fromisoformat(program['stop_datetime'])
+                    _LOGGER.debug("Loaded %d programs from JSON for %s", len(data), self._channel_id)
+            except Exception as err:
+                _LOGGER.error("Error loading JSON for %s: %s", self._channel_id, err)
+
+    def _save_to_json(self, data: List[Dict[str, Any]]) -> None:
+        """Save data to JSON file."""
+        try:
+            # Convert datetime objects to strings for JSON serialization
+            json_data = []
+            for program in data:
+                program_copy = program.copy()
+                if 'start_datetime' in program_copy and isinstance(program_copy['start_datetime'], datetime):
+                    program_copy['start_datetime'] = program_copy['start_datetime'].isoformat()
+                if 'stop_datetime' in program_copy and isinstance(program_copy['stop_datetime'], datetime):
+                    program_copy['stop_datetime'] = program_copy['stop_datetime'].isoformat()
+                json_data.append(program_copy)
+
+            with open(self._json_file, 'w', encoding='utf-8') as f:
+                json.dump(json_data, f, ensure_ascii=False, indent=2)
+            _LOGGER.debug("Saved %d programs to JSON for %s", len(json_data), self._channel_id)
+        except Exception as err:
+            _LOGGER.error("Error saving JSON for %s: %s", self._channel_id, err)
+
+    @property
+    def _channel_data(self) -> List[Dict[str, Any]]:
+        """Get channel data from coordinator."""
+        if not self.coordinator.data:
+            return []
+        # Data are now a list directly, not a dict
+        return self.coordinator.data if isinstance(self.coordinator.data, list) else []
+
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        # Save to JSON when coordinator updates
+        channel_data = self._channel_data
+        if channel_data:
+            self._save_to_json(channel_data)
+        super()._handle_coordinator_update()
+
     def _get_programs(self) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
         """Get current and next programs with caching."""
-        if not self.coordinator.data:
-            return None, []
-            
-        channel_data = self.coordinator.data.get(self._channel_id, [])
+        channel_data = self._channel_data
         if not channel_data:
             return None, []
         
@@ -126,10 +185,7 @@ class SkTVProgramSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self) -> Dict[str, Any]:
         """Return the state attributes."""
         try:
-            if not self.coordinator.data:
-                return {}
-                
-            channel_data = self.coordinator.data.get(self._channel_id, [])
+            channel_data = self._channel_data
             if not channel_data:
                 return {}
             

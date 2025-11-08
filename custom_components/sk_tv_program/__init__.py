@@ -24,48 +24,60 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Slovak TV Program from a config entry."""
     hass.data.setdefault(DOMAIN, {})
-    
+
     try:
-        api = SkTVProgramAPI(
-            hass=hass,
-            channels=entry.data.get("channels", [])
-        )
-        
-        async def async_update_data():
-            """Fetch data with error handling."""
+        channels = entry.data.get("channels", [])
+
+        # Create a coordinator for each channel
+        coordinators = {}
+
+        for channel_id in channels:
+            api = SkTVProgramAPI(
+                hass=hass,
+                channels=[channel_id]  # Only this channel
+            )
+
+            async def async_update_data(channel=channel_id, api_instance=api):
+                """Fetch data with error handling for a specific channel."""
+                try:
+                    data = await api_instance.async_update_channel_data(channel)
+                    if not data:
+                        _LOGGER.warning("No data received from API for channel %s", channel)
+                    return data
+                except Exception as err:
+                    raise UpdateFailed(f"Error fetching data for {channel}: {err}") from err
+
+            coordinator = DataUpdateCoordinator(
+                hass,
+                _LOGGER,
+                name=f"{DOMAIN}_{channel_id}",
+                update_method=async_update_data,
+                update_interval=SCAN_INTERVAL,
+            )
+
+            # První refresh s timeout protection
             try:
-                data = await api.async_update_data()
-                if not data:
-                    _LOGGER.warning("No data received from API")
-                return data
+                await coordinator.async_config_entry_first_refresh()
             except Exception as err:
-                raise UpdateFailed(f"Error fetching data: {err}") from err
-        
-        coordinator = DataUpdateCoordinator(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_method=async_update_data,
-            update_interval=SCAN_INTERVAL,
-        )
-        
-        # První refresh s timeout protection
-        try:
-            await coordinator.async_config_entry_first_refresh()
-        except Exception as err:
-            _LOGGER.error("Failed to fetch initial data: %s", err)
-            raise ConfigEntryNotReady(f"Failed to fetch initial data: {err}") from err
-        
-        hass.data[DOMAIN][entry.entry_id] = {
-            "coordinator": coordinator,
-            "api": api,
-        }
-        
+                _LOGGER.error("Failed to fetch initial data for %s: %s", channel_id, err)
+                # Continue with other channels even if one fails
+                continue
+
+            coordinators[channel_id] = {
+                "coordinator": coordinator,
+                "api": api,
+            }
+
+        if not coordinators:
+            raise ConfigEntryNotReady("Failed to fetch initial data for all channels")
+
+        hass.data[DOMAIN][entry.entry_id] = coordinators
+
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        
-        _LOGGER.info("Slovak TV Program integration loaded successfully")
+
+        _LOGGER.info("Slovak TV Program integration loaded successfully with %d channels", len(coordinators))
         return True
-        
+
     except ConfigEntryNotReady:
         raise
     except Exception as err:
